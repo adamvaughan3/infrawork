@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 import pytest
-from testinfra_utils import vars_for_host
+from testinfra_utils import vars_for_target
 
 
 def pytest_addoption(parser):
@@ -83,6 +83,7 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture
-def host_vars(host):
+def host_vars(host, request):
     """Vars provided via --test for the current host."""
-    return vars_for_host(host.backend.get_hostname())
+    role = _role_from_path(str(request.node.path)) or ""
+    return vars_for_target(role, host.backend.get_hostname())
