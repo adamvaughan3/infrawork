@@ -59,9 +59,14 @@ def run_command(
     parallel: bool = typer.Option(
         False, "--parallel", help="Run roles/hosts in parallel with separate logs"
     ),
+    deps_file: Path = typer.Option(
+        None,
+        "--deps-file",
+        help="Path to dependency file (defaults to <playbook>.deps.yml when using --parallel)",
+    ),
 ):
     """Execute each role/host in the playbook in parallel via ansible-runner."""
-    rc = run_playbook(playbook, max_parallel=max_parallel, parallel=parallel)
+    rc = run_playbook(playbook, max_parallel=max_parallel, parallel=parallel, deps_file=deps_file)
     raise typer.Exit(code=rc)
 
 if __name__ == "__main__":

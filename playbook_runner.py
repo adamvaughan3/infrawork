@@ -1,5 +1,7 @@
+import json
 import re
 import tempfile
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -82,7 +84,9 @@ def _run_role_host(
         return role, host, r.rc or 0
 
 
-def run_playbook(playbook: Path, max_parallel: int = 5, parallel: bool = False) -> int:
+def run_playbook(
+    playbook: Path, max_parallel: int = 5, parallel: bool = False, deps_file: Path | None = None
+) -> int:
     """Execute roles/hosts from the playbook. Parallel or single-process ansible-runner."""
     cfg_path = Path(find_ansible_cfg())
     inventory_path = Path(resolve_inventory_path())
@@ -101,6 +105,14 @@ def run_playbook(playbook: Path, max_parallel: int = 5, parallel: bool = False) 
         for play in plays
         for role, host, vars_dict in collect_tests(play)
     ]
+
+    dep_path = deps_file or playbook.with_suffix(playbook.suffix + ".deps.yml")
+    deps_raw = {}
+    if dep_path.exists():
+        try:
+            deps_raw = yaml.safe_load(dep_path.read_text()) or {}
+        except Exception:
+            deps_raw = {}
 
     # Validate roles exist before running
     roles_root = Path("roles")
@@ -146,21 +158,114 @@ def run_playbook(playbook: Path, max_parallel: int = 5, parallel: bool = False) 
         )
         return r.rc or 0
 
+    # Resolve role path once for summary logging and prepare labels
+    job_logs: Dict[int, Path] = {}
+    job_role_paths: Dict[int, Path] = {}
+    display_labels: Dict[int, str] = {}
+    base_labels: Dict[int, str] = {}
+    log_label_to_id: Dict[str, int] = {}
+    base_to_ids: Dict[str, List[int]] = {}
+    counts: Dict[str, int] = {}
+
+    for idx, job in enumerate(jobs):
+        base_label = f"{job['role']}@{job['host']}"
+        counts[base_label] = counts.get(base_label, 0) + 1
+        run_idx = counts[base_label] - 1
+        log_label = f"{base_label}#{run_idx}"
+        display_label = base_label if counts[base_label] == 1 else f"{base_label} (run {counts[base_label]})"
+
+        safe = "".join(c if c.isalnum() or c in "-_@" else "_" for c in log_label)
+        job_logs[idx] = log_dir / f"{safe}.log"
+        candidate = roles_root / job["role"]
+        job_role_paths[idx] = candidate if candidate.exists() else Path(f"(not found: {candidate})")
+
+        display_labels[idx] = display_label
+        base_labels[idx] = base_label
+        log_label_to_id[log_label] = idx
+        base_to_ids.setdefault(base_label, []).append(idx)
+
+    def parse_target(raw: str) -> Tuple[str, Dict[str, Any]]:
+        if not isinstance(raw, str):
+            return str(raw), {}
+        if ":vars=" in raw:
+            base, var_part = raw.split(":vars=", 1)
+            try:
+                vars_filter = json.loads(var_part)
+            except Exception:
+                vars_filter = {}
+            return base, vars_filter if isinstance(vars_filter, dict) else {}
+        return raw, {}
+
+    missing_deps = []
+    in_degree: Dict[int, int] = {idx: 0 for idx in range(len(jobs))}
+    edges: Dict[int, List[int]] = {idx: [] for idx in range(len(jobs))}
+
+    # Build dependency graph if provided
+    deps_map: Dict[str, List[str]] = {}
+    if isinstance(deps_raw, dict):
+        deps_map = {str(k): v if isinstance(v, list) else [] for k, v in deps_raw.items()}
+
+    # Iterate over dependency declarations and apply to matching jobs
+    for raw_key, raw_deps in deps_map.items():
+        key_base, key_vars = parse_target(raw_key)
+        target_ids = [
+            idx
+            for idx, job in enumerate(jobs)
+            if base_labels[idx] == key_base
+            and (not key_vars or key_vars == job["vars"])
+        ]
+        if not target_ids:
+            missing_deps.append(raw_key)
+            continue
+
+        for dep_raw in raw_deps:
+            dep_base, dep_vars = parse_target(dep_raw)
+            dep_ids: List[int] = [
+                idx
+                for idx, job in enumerate(jobs)
+                if base_labels[idx] == dep_base
+                and (not dep_vars or dep_vars == job["vars"])
+            ]
+            if not dep_ids:
+                missing_deps.append(dep_raw)
+                continue
+
+            for target_id in target_ids:
+                for dep_id in dep_ids:
+                    edges[dep_id].append(target_id)
+                    in_degree[target_id] += 1
+
+    if missing_deps:
+        typer.echo(
+            "Missing dependency targets:\n" + "\n".join(f"- {d}" for d in sorted(set(missing_deps))),
+            err=True,
+        )
+        return 1
+
+    ready = deque([idx for idx, deg in in_degree.items() if deg == 0])
+    if not ready:
+        typer.echo("Dependency graph has cycles or no starting nodes.", err=True)
+        return 1
+
     typer.echo(f"Launching {len(jobs)} tasks in parallel. Logs dir: {log_dir}")
 
     results = []
-    running = set(job_labels)
+    running: set[int] = set()
 
     def print_running():
         if running:
-            typer.echo(f"Running ({len(running)}): {', '.join(sorted(running))}")
+            names = [display_labels[i] for i in sorted(running)]
+            typer.echo(f"Running ({len(running)}): {', '.join(names)}")
         else:
             typer.echo("Running: none")
 
     worker_count = max(1, min(max_parallel, len(jobs)))
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        future_map = {
-            executor.submit(
+        future_map: Dict[Any, int] = {}
+
+        def submit_job(idx: int):
+            job = jobs[idx]
+            future = executor.submit(
                 _run_role_host,
                 job["role"],
                 job["host"],
@@ -169,23 +274,35 @@ def run_playbook(playbook: Path, max_parallel: int = 5, parallel: bool = False) 
                 inventory_path,
                 job_logs[idx],
                 job_role_paths[idx],
-            ): (idx, job)
-            for idx, job in enumerate(jobs)
-        }
-        print_running()
-        for future in as_completed(future_map):
-            job_idx, job = future_map[future]
-            label = job_labels[job_idx]
-            try:
-                _, _, rc = future.result()
-                results.append((label, rc))
-                status = "ok" if rc == 0 else f"failed (rc={rc})"
-                typer.echo(f"{label}: {status} (log: {job_logs[job_idx]})")
-            except Exception as exc:  # noqa: BLE001
-                results.append((label, 1))
-                typer.echo(f"{label}: error {exc}", err=True)
-            running.discard(label)
+            )
+            future_map[future] = idx
+
+        while ready or future_map:
+            while ready and len(future_map) < worker_count:
+                idx = ready.popleft()
+                submit_job(idx)
+                running.add(idx)
             print_running()
+
+            if not future_map:
+                break
+
+            done_future = next(as_completed(future_map))
+            idx = future_map.pop(done_future)
+            running.discard(idx)
+            try:
+                _, _, rc = done_future.result()
+                results.append((display_labels[idx], rc))
+                status = "ok" if rc == 0 else f"failed (rc={rc})"
+                typer.echo(f"{display_labels[idx]}: {status} (log: {job_logs[idx]})")
+            except Exception as exc:  # noqa: BLE001
+                results.append((display_labels[idx], 1))
+                typer.echo(f"{display_labels[idx]}: error {exc}", err=True)
+
+            for dep in edges.get(idx, []):
+                in_degree[dep] -= 1
+                if in_degree[dep] == 0:
+                    ready.append(dep)
 
     failed = [(label, rc) for label, rc in results if rc != 0]
     if failed:
