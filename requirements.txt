@@ -1,0 +1,7 @@
+ansible-core
+PyYAML
+pytest
+pytest-xdist
+pytest-html
+testinfra
+typer
