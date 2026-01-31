@@ -19,6 +19,11 @@ def test_command(
         "--report",
         help="Generate an HTML report in reports/report.html",
     ),
+    max_parallel: str = typer.Option(
+        "auto",
+        "--max-parallel",
+        help="Max parallel tests for pytest-xdist (-n value). Defaults to 'auto'.",
+    ),
 ):
     """Run testinfra/pytest for each role/host defined in the playbook."""
     if report:
@@ -43,6 +48,8 @@ def test_command(
         raise typer.Exit(code=1)
 
     pytest_args = build_pytest_args(plays, include_report=report)
+    if max_parallel:
+        pytest_args[pytest_args.index("-n") + 1] = str(max_parallel)
     if not any(arg == "--test" for arg in pytest_args):
         typer.echo("No roles found in playbook; nothing to run.")
         raise typer.Exit(code=0)
@@ -64,9 +71,16 @@ def run_command(
         "--deps-file",
         help="Path to dependency file (defaults to <playbook>.deps.yml when using --parallel)",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Simulate execution (1s per task) without running ansible; forces parallel scheduler.",
+    ),
 ):
     """Execute each role/host in the playbook in parallel via ansible-runner."""
-    rc = run_playbook(playbook, max_parallel=max_parallel, parallel=parallel, deps_file=deps_file)
+    rc = run_playbook(
+        playbook, max_parallel=max_parallel, parallel=parallel, deps_file=deps_file, dry_run=dry_run
+    )
     raise typer.Exit(code=rc)
 
 if __name__ == "__main__":

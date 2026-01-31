@@ -1,7 +1,7 @@
-role2@mac2:
-  - role1@mac1
-  - role1@mac2
+# Any time role2 runs (any host/vars), wait for all role1 executions first
+role2:
+  - role1
 
-# Example with vars matching (only applies if the job vars match)
-role2@mac2:vars={"test3":"test3"}:
-  - role1@mac2:vars={"test1":"test1"}
+# Example: only role2 on mac2 with these vars waits for all role1 on mac2 with matching vars
+role2@mac7:vars={"test1":"test1"}:
+  - role1@mac1:vars={"test1":"test1"}

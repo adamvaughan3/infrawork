@@ -1,0 +1,7 @@
+inventory/hosts.ini
+logs/
+env/
+reports/
+artifacts/
+.venv/
+__pycache__/
