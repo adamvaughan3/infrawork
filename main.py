@@ -10,7 +10,6 @@ from generate_pytest_command import REPORT_PATH, build_pytest_args, collect_test
 from playbook_runner import run_playbook
 
 app = typer.Typer(name="infrawork", help="Infrawork CLI for running testinfra from playbooks.")
-
 @app.command("test")
 def test_command(
     playbook: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False),
@@ -76,10 +75,21 @@ def run_command(
         "--dry-run",
         help="Simulate execution (1s per task) without running ansible; forces parallel scheduler.",
     ),
+    download_only: bool = typer.Option(
+        False,
+        "--download-only",
+        help="Run with tag 'download_only' to fetch artifacts only",
+    ),
 ):
     """Execute each role/host in the playbook in parallel via ansible-runner."""
+    tags = ["download_only"] if download_only else None
     rc = run_playbook(
-        playbook, max_parallel=max_parallel, parallel=parallel, deps_file=deps_file, dry_run=dry_run
+        playbook,
+        max_parallel=max_parallel,
+        parallel=parallel,
+        deps_file=deps_file,
+        dry_run=dry_run,
+        tags=tags,
     )
     raise typer.Exit(code=rc)
 

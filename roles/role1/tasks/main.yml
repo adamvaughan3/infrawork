@@ -4,3 +4,8 @@
 - name: Output message
   ansible.builtin.debug:
     msg: "Running role1"
+#  tags: download_only
+
+- ansible.builtin.fail:
+    msg: "force failure"
+  when: force_fail

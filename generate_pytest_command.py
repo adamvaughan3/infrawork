@@ -1,15 +1,4 @@
-#!/usr/bin/env python3
-"""
-Generate a pytest command from an Ansible playbook that exercises each role on
-its target hosts with any provided vars.
-
-Usage:
-    python generate_pytest_command.py playbooks/main.yml
-"""
-import argparse
 import json
-import shlex
-import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
@@ -94,44 +83,3 @@ def build_command(plays: List[dict], include_report: bool = False) -> List[str]:
     return build_pytest_args(
         plays, include_pytest_executable=True, include_report=include_report
     )
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Generate pytest command from an Ansible playbook"
-    )
-    parser.add_argument(
-        "playbook",
-        type=Path,
-        help="Path to playbook YAML (e.g. playbooks/main.yml)",
-    )
-    parser.add_argument(
-        "--report",
-        action="store_true",
-        help="Include HTML report (reports/report.html)",
-    )
-    args = parser.parse_args()
-
-    if not args.playbook.exists():
-        print(f"Playbook not found: {args.playbook}", file=sys.stderr)
-        return 1
-
-    with args.playbook.open() as f:
-        plays = yaml.safe_load(f) or []
-
-    if not isinstance(plays, list):
-        print("Playbook root should be a list of plays", file=sys.stderr)
-        return 1
-
-    cmd_parts = build_command(plays, include_report=args.report)
-    if not any(part == "--test" for part in cmd_parts):
-        print("No roles found in playbook; nothing to run.")
-        return 0
-
-    printable = " ".join(shlex.quote(part) for part in cmd_parts)
-    print(printable)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

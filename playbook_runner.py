@@ -161,12 +161,25 @@ def _build_dependency_graph(
 
             for target_id in target_ids:
                 for dep_id in dep_ids:
+                    if dep_id == target_id:
+                        typer.echo(
+                            typer.style(
+                                f"Dependencies not found (deps: {dep_path}): self-dependency on {raw_key}",
+                                fg=typer.colors.RED,
+                                bold=True,
+                            ),
+                            err=True,
+                        )
+                        return None, None
                     edges[dep_id].append(target_id)
                     in_degree[target_id] += 1
 
     if missing_targets:
         typer.echo(
-            typer.style("Warning: dependency targets not present in this run:", fg=typer.colors.YELLOW)
+            typer.style(
+                f"Warning: dependency targets not present in this run (deps: {dep_path}):",
+                fg=typer.colors.YELLOW,
+            )
             + "\n"
             + "\n".join(f"- {d}" for d in sorted(set(missing_targets))),
             err=True,
@@ -195,6 +208,7 @@ def _run_role_host(
     log_path: Path,
     role_path: Path,
     dry_run: bool = False,
+    tags: List[str] | None = None,
 ) -> Tuple[str, str, int]:
     """Execute a single role/host combo with ansible-runner."""
     if dry_run:
@@ -204,12 +218,13 @@ def _run_role_host(
             f"Path   : {role_path}",
             f"Host   : {host}",
             f"Vars   : {vars_dict if vars_dict else '{}'}",
+            f"Tags   : {tags if tags else '[]'}",
             "Dry run: task not executed, simulated 1s delay.",
             "-" * 60,
             "",
         ]
         with log_path.open("w", encoding="utf-8") as fh:
-            fh.write("\n".join(summary_lines))
+            fh.write("\n".join(map(str, summary_lines)))
         return role, host, 0
 
     with tempfile.TemporaryDirectory(prefix=f"{role}-{host}-") as tmpdir:
@@ -232,12 +247,14 @@ def _run_role_host(
             "ANSIBLE_NOCOLOR": "1",
         }
 
+        tag_arg = ",".join(tags) if tags else None
         r = ansible_runner.run(
             private_data_dir=tmpdir,
             playbook=str(playbook_path),
             inventory=str(inventory_path),
             envvars=env_vars,
             quiet=True,
+            tags=tag_arg,
         )
         stdout_data = r.stdout
         if hasattr(stdout_data, "read"):
@@ -257,24 +274,29 @@ def _run_role_host(
             f"Path   : {role_path}",
             f"Host   : {host}",
             f"Vars   : {vars_dict if vars_dict else '{}'}",
+            f"Tags   : {tags if tags else '[]'}",
             "-" * 60,
             "",
         ]
         with log_path.open("w", encoding="utf-8") as fh:
-            fh.write("\n".join(summary_lines))
+            fh.write("\n".join(map(str, summary_lines)))
             fh.write(stdout_text)
         return role, host, r.rc or 0
 
 
-def _run_sequential(playbook: Path, cfg_path: Path, inventory_path: Path) -> int:
+def _run_sequential(
+    playbook: Path, cfg_path: Path, inventory_path: Path, tags: List[str] | None = None
+) -> int:
     typer.echo("Running playbook sequentially with ansible-runner...")
     pdir = playbook.parent.resolve()
+    tag_arg = ",".join(tags) if tags else None
     r = ansible_runner.run(
         private_data_dir=str(pdir),
         playbook=playbook.name,
         inventory=str(inventory_path),
         envvars={"ANSIBLE_CONFIG": str(cfg_path)},
         quiet=False,
+        tags=tag_arg,
     )
     return r.rc or 0
 
@@ -288,6 +310,7 @@ def _run_parallel(
     max_parallel: int,
     dep_path: Path,
     dry_run: bool = False,
+    tags: List[str] | None = None,
 ):
     job_logs, job_role_paths, display_labels, base_labels, role_to_ids = _prepare_job_metadata(
         jobs, log_dir
@@ -295,7 +318,7 @@ def _run_parallel(
 
     typer.echo("Planned parallel tasks:")
     for idx in range(len(jobs)):
-        typer.echo(f"- {display_labels[idx]} vars={jobs[idx]['vars']}")
+        typer.echo(f"- {display_labels[idx]} vars={jobs[idx]['vars']} tags={tags if tags else '[]'}")
     typer.echo("-" * 60)
 
     graph = _build_dependency_graph(jobs, deps_raw, base_labels, role_to_ids, dep_path)
@@ -342,6 +365,7 @@ def _run_parallel(
                 job_logs[idx],
                 job_role_paths[idx],
                 dry_run,
+                tags,
             )
             future_map[future] = idx
             launched.add(idx)
@@ -419,7 +443,7 @@ def _run_parallel(
         summary_lines.extend(
             typer.style(f"- {label} rc={rc}", fg=typer.colors.RED) for label, rc in failed
         )
-    summary_lines.append(typer.style(f"Total wall time: {total_duration:.2f}s", fg=typer.colors.BLUE))
+    summary_lines.append(typer.style(f"Total execution time: {total_duration:.2f}s", fg=typer.colors.BLUE))
     typer.echo("\n".join(summary_lines))
 
     if failed:
@@ -435,6 +459,7 @@ def run_playbook(
     parallel: bool = False,
     deps_file: Path | None = None,
     dry_run: bool = False,
+    tags: List[str] | None = None,
 ) -> int:
     """Execute roles/hosts from the playbook. Parallel or single-process ansible-runner."""
     cfg_path = Path(find_ansible_cfg())
@@ -459,11 +484,16 @@ def run_playbook(
         typer.echo("No roles found in playbook; nothing to run.")
         return 0
 
+    typer.echo("Execution context:")
+    typer.echo(f"- ansible.cfg: {cfg_path}")
+    typer.echo(f"- inventory : {inventory_path}")
+    typer.echo(f"- logs dir  : {log_dir.resolve()}")
+
     if dry_run:
         parallel = True
 
     if not parallel:
-        return _run_sequential(playbook, cfg_path, inventory_path)
+        return _run_sequential(playbook, cfg_path, inventory_path, tags=tags)
 
     return _run_parallel(
         jobs,
@@ -474,4 +504,5 @@ def run_playbook(
         max_parallel,
         dep_path,
         dry_run,
+        tags,
     )
