@@ -22,12 +22,31 @@ def _load_plays(playbook: Path) -> List[dict] | None:
     if not isinstance(plays, list):
         typer.echo("Playbook root should be a list of plays.", err=True)
         return None
+    allowed_keys = {"hosts", "roles", "vars", "strategy"}
+    for idx, play in enumerate(plays, start=1):
+        if not isinstance(play, dict):
+            typer.echo(f"Warning: play #{idx} is not a dict; skipping", err=True)
+            continue
+        extra = set(play.keys()) - allowed_keys
+        if extra:
+            typer.echo(
+                typer.style(
+                    f"Warning: play #{idx} has unsupported keys {sorted(extra)} (allowed: {sorted(allowed_keys)})",
+                    fg=typer.colors.YELLOW,
+                ),
+                err=True,
+            )
     return plays
 
 
 def _build_jobs(plays: List[dict]) -> List[Dict[str, Any]]:
     return [
-        {"role": role, "host": host, "vars": vars_dict}
+        {
+            "role": role,
+            "host": host,
+            "vars": vars_dict,
+            "strategy": play.get("strategy"),
+        }
         for play in plays
         for role, host, vars_dict in collect_tests(play)
     ]
@@ -209,6 +228,7 @@ def _run_role_host(
     role_path: Path,
     dry_run: bool = False,
     tags: List[str] | None = None,
+    strategy: str | None = None,
 ) -> Tuple[str, str, int]:
     """Execute a single role/host combo with ansible-runner."""
     if dry_run:
@@ -218,6 +238,7 @@ def _run_role_host(
             f"Path   : {role_path}",
             f"Host   : {host}",
             f"Vars   : {vars_dict if vars_dict else '{}'}",
+            f"Strategy: {strategy if strategy else 'default'}",
             f"Tags   : {tags if tags else '[]'}",
             "Dry run: task not executed, simulated 1s delay.",
             "-" * 60,
@@ -235,6 +256,7 @@ def _run_role_host(
                 {
                     "hosts": host,
                     "gather_facts": False,
+                    **({"strategy": strategy} if strategy else {}),
                     "roles": [{"role": role, "vars": vars_dict} if vars_dict else {"role": role}],
                 }
             ],
@@ -274,6 +296,7 @@ def _run_role_host(
             f"Path   : {role_path}",
             f"Host   : {host}",
             f"Vars   : {vars_dict if vars_dict else '{}'}",
+            f"Strategy: {strategy if strategy else 'default'}",
             f"Tags   : {tags if tags else '[]'}",
             "-" * 60,
             "",
@@ -318,7 +341,10 @@ def _run_parallel(
 
     typer.echo("Planned parallel tasks:")
     for idx in range(len(jobs)):
-        typer.echo(f"- {display_labels[idx]} vars={jobs[idx]['vars']} tags={tags if tags else '[]'}")
+        strategy = jobs[idx].get("strategy") or "default"
+        typer.echo(
+            f"- {display_labels[idx]} strategy={strategy} vars={jobs[idx]['vars']} tags={tags if tags else '[]'}"
+        )
     typer.echo("-" * 60)
 
     graph = _build_dependency_graph(jobs, deps_raw, base_labels, role_to_ids, dep_path)
@@ -366,6 +392,7 @@ def _run_parallel(
                 job_role_paths[idx],
                 dry_run,
                 tags,
+                job.get("strategy"),
             )
             future_map[future] = idx
             launched.add(idx)
