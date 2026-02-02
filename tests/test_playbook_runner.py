@@ -69,7 +69,7 @@ def test_parallel_missing_dep_causes_error(tmp_path, fake_runner, capsys):
         "  - missingrole\n",
     )
 
-    rc = run_playbook(playbook, parallel=True, deps_file=deps)
+    rc = run_playbook(playbook, parallel=True, deps_file=deps, validate_roles=False)
 
     captured = capsys.readouterr()
     assert "Dependencies not found" in captured.err
@@ -85,7 +85,7 @@ def test_parallel_missing_target_warns_but_runs(tmp_path, fake_runner, capsys):
         "  - role1@mac2\n",
     )
 
-    rc = run_playbook(playbook, parallel=True, deps_file=deps)
+    rc = run_playbook(playbook, parallel=True, deps_file=deps, validate_roles=False)
 
     captured = capsys.readouterr()
     assert "Warning: dependency targets not present" in captured.err
@@ -97,7 +97,7 @@ def test_parallel_missing_target_warns_but_runs(tmp_path, fake_runner, capsys):
 def test_parallel_logs_and_summary(tmp_path, fake_runner):
     playbook = write_playbook(tmp_path, PLAYBOOK_CONTENT)
 
-    rc = run_playbook(playbook, parallel=True, deps_file=None)
+    rc = run_playbook(playbook, parallel=True, deps_file=None, validate_roles=False)
 
     assert rc == 0
     # Two roles -> two calls
@@ -124,7 +124,7 @@ def test_dependency_order_respected(tmp_path, ordered_runner):
         "  - role1\n",
     )
 
-    rc = run_playbook(playbook, parallel=True, deps_file=deps)
+    rc = run_playbook(playbook, parallel=True, deps_file=deps, validate_roles=False)
 
     assert rc == 0
     # role1 should be invoked before role2 due to dependency

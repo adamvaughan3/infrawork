@@ -78,8 +78,8 @@ def build_pytest_args(
     return args
 
 
-def build_command(plays: List[dict], include_report: bool = False) -> List[str]:
-    """Backward-compatible helper that includes 'pytest' as the first element."""
-    return build_pytest_args(
-        plays, include_pytest_executable=True, include_report=include_report
-    )
+# def build_command(plays: List[dict], include_report: bool = False) -> List[str]:
+#     """Backward-compatible helper that includes 'pytest' as the first element."""
+#     return build_pytest_args(
+#         plays, include_pytest_executable=True, include_report=include_report
+#     )

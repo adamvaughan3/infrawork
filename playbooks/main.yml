@@ -1,4 +1,5 @@
 - hosts: mac1, mac2
+  strategy: free
   roles:
     - role1
     - role2

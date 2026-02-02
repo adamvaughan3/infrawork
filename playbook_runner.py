@@ -62,17 +62,17 @@ def _load_deps(dep_path: Path) -> Dict[str, List[str]]:
         return {}
 
 
-def _validate_roles(jobs: List[Dict[str, Any]]) -> int | None:
+def _validate_roles(jobs: List[Dict[str, Any]], fail_on_missing: bool = True) -> int | None:
     roles_root = Path("roles")
     missing_roles = sorted(
         {job["role"] for job in jobs if not (roles_root / job["role"]).exists()}
     )
     if missing_roles:
-        typer.echo(
-            "Missing roles:\n" + "\n".join(f"- {r}" for r in missing_roles),
-            err=True,
-        )
-        return 1
+        message = "Missing roles:\n" + "\n".join(f"- {r}" for r in missing_roles)
+        if fail_on_missing:
+            typer.echo(message, err=True)
+            return 1
+        typer.echo(typer.style(message, fg=typer.colors.YELLOW), err=True)
     return None
 
 
@@ -487,8 +487,12 @@ def run_playbook(
     deps_file: Path | None = None,
     dry_run: bool = False,
     tags: List[str] | None = None,
+    validate_roles: bool = True,
 ) -> int:
-    """Execute roles/hosts from the playbook. Parallel or single-process ansible-runner."""
+    """Execute roles/hosts from the playbook. Parallel or single-process ansible-runner.
+
+    Set validate_roles=False to allow running without role directories on disk (useful for tests).
+    """
     cfg_path = Path(find_ansible_cfg())
     inventory_path = Path(resolve_inventory_path())
     log_dir = Path("logs")
@@ -503,7 +507,7 @@ def run_playbook(
     dep_path = deps_file or playbook.with_suffix(playbook.suffix + ".deps.yml")
     deps_raw = _load_deps(dep_path)
 
-    role_check = _validate_roles(jobs)
+    role_check = _validate_roles(jobs, fail_on_missing=validate_roles)
     if role_check:
         return role_check
 
