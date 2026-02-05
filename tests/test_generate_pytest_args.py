@@ -15,5 +15,14 @@ def test_build_pytest_args_contains_tests_entries():
         {"hosts": "mac1,mac2", "roles": ["role1", "role2"], "vars": {"k": "v"}},
     ]
     args = build_pytest_args(plays)
-    test_args = [a for a in args if a.startswith("role")]
+    test_args = [a for a in args if a.startswith("role") and ":" in a]
     assert len(test_args) == 4  # 2 roles * 2 hosts
+
+
+def test_build_pytest_args_normalizes_nested_role_name():
+    plays = [
+        {"hosts": "mac1", "roles": ["nested/role3"]},
+    ]
+    args = build_pytest_args(plays)
+    test_args = [a for a in args if a.startswith("role") and ":" in a]
+    assert test_args == ["role3:mac1"]

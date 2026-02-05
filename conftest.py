@@ -57,9 +57,20 @@ def _role_from_path(path: str) -> Optional[str]:
     if "roles" not in parts:
         return None
     idx = parts.index("roles")
-    if idx + 1 < len(parts):
-        return parts[idx + 1]
-    return None
+    if idx + 1 >= len(parts):
+        return None
+
+    role_parts = []
+    for part in parts[idx + 1 :]:
+        if part in {"tests", "tasks", "handlers", "defaults", "vars", "meta", "files", "templates"}:
+            break
+        role_parts.append(part)
+
+    if not role_parts:
+        return None
+
+    # Use the last segment so nested roles like roles/nested/role3 map to "role3"
+    return role_parts[-1]
 
 
 def pytest_collection_modifyitems(config, items):

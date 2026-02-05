@@ -36,6 +36,11 @@ def extract_role(entry) -> Tuple[str, Dict]:
     return role_name or "", vars_dict
 
 
+def _normalize_role_key(role_name: str) -> str:
+    """Use the final path component so nested roles map to the role directory name."""
+    return Path(role_name).name
+
+
 def collect_tests(play: dict) -> Iterable[Tuple[str, str, Dict]]:
     """Yield (role, host, vars) tuples for a play."""
     play_vars = play.get("vars") or {}
@@ -57,7 +62,7 @@ def build_pytest_args(
     args = []
     if include_pytest_executable:
         args.append("pytest")
-    args.extend(["-v", "-n", "auto", "--connection=ansible", "--force-ansible"])
+    args.extend(["-v", "-n", "auto", "--connection=ansible", "--force-ansible", "roles"])
 
     if include_report:
         args.extend(
@@ -70,7 +75,7 @@ def build_pytest_args(
 
     for play in plays:
         for role_name, host, vars_dict in collect_tests(play):
-            arg = f"{role_name}:{host}"
+            arg = f"{_normalize_role_key(role_name)}:{host}"
             if vars_dict:
                 arg += f":vars={json.dumps(vars_dict, separators=(',', ':'))}"
             args.extend(["--test", arg])

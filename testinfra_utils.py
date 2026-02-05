@@ -49,14 +49,32 @@ def _load_yaml(path: Path) -> dict:
 
 
 @lru_cache(maxsize=None)
+def _resolve_role_dir(role_name: str) -> Path:
+    """Find the directory for a role, supporting nested roles."""
+    base_dir = Path("roles")
+    candidate = base_dir / role_name
+    if candidate.is_dir():
+        return candidate
+
+    matches = [p for p in base_dir.glob(f"**/{role_name}") if p.is_dir()]
+    if not matches:
+        raise FileNotFoundError(f"Role directory not found for '{role_name}' under {base_dir}")
+    if len(matches) > 1:
+        raise ValueError(
+            f"Multiple role directories found for '{role_name}': {', '.join(str(p) for p in matches)}"
+        )
+    return matches[0]
+
+
+@lru_cache(maxsize=None)
 def load_role_defaults(role_name: str) -> dict:
-    role_dir = Path("roles") / role_name
+    role_dir = _resolve_role_dir(role_name)
     return _load_yaml(role_dir / "defaults" / "main.yml")
 
 
 @lru_cache(maxsize=None)
 def load_role_vars(role_name: str) -> dict:
-    role_dir = Path("roles") / role_name
+    role_dir = _resolve_role_dir(role_name)
     return _load_yaml(role_dir / "vars" / "main.yml")
 
 
